@@ -1,0 +1,26 @@
+                                                                                       | Credit Card Fraud Detection System DataIngestion Batch layer |
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--Create sqoop job card_member ingest from AWS RDS to HADOOP
+
+sqoop job --create incremental_card_member --meta-connect "jdbc:mysql://localhost/sqoop?user=sqoop&password=sqoop" -- import --connect jdbc:mysql://upgradawsrds.cpclxrkdvwmz.us-east-1.rds.amazonaws.com/cred_financials_data --username upgraduser --password upgraduser --table card_member --incremental append --check-column member_joining_dt --last-value "1970-01-01 00:00:00" --warehouse-dir /user/sqoop_import/capstone_project  
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Execute the job once to get the initial data load
+
+sqoop job --exec incremental_card_member 
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- import for member_score table which is full load everytime
+
+sqoop job --create cred_member_score \
+--meta-connect "jdbc:mysql://localhost/sqoop?user=sqoop&password=sqoop" \
+-- import \
+--connect jdbc:mysql://upgradawsrds.cpclxrkdvwmz.us-east-1.rds.amazonaws.com/cred_financials_data \
+--username upgraduser \
+--password upgraduser \
+--table member_score \
+--warehouse-dir /user/sqoop_import/capstone_project
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Execute the job once to get the initial data load
+
+sqoop job --exec cred_member_score
+
+

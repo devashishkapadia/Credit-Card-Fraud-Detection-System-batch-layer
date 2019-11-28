@@ -1,0 +1,108 @@
+                                                                                       | Credit Card Fraud Detection System PreAnalysis Batch layer |
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--Create mapping table in hive for Hbase card_member table
+
+create external table card_member_hbase(card_id bigint,member_id bigint,joining_dt string,purchase_dt string,country string,city string)
+STORED BY 'org.apache.hadoop.hive.hbase.HBaseStorageHandler'
+with serdeproperties ('hbase.columns.mapping'=':key,card_detail:member_id,card_detail:joining_dt,card_detail:purchase_dt,location:country,location:city')
+tblproperties('hbase.table.name'='card_member');
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Card member staging table in hive
+
+create external table if not exists card_member_load (
+card_id bigint,
+member_id bigint,
+joining_dt string,
+purchase_dt string,
+country string,
+city string) row format delimited fields terminated by "," location '/user/sqoop_import/capstone_project/card_member';
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Insert data into HBase mapping table
+
+insert into table card_member_hbase select * from card_member_load;
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Create member score table
+
+create external table member_score(
+member_id bigint,
+score bigint) row format delimited fields terminated by ',' location '/user/sqoop_import/capstone_project/member_score';
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Create lookup UCL staging table
+
+create table lookup_ucl (
+card_id bigint,
+member_id bigint,
+ucl bigint);
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Cal UCL and insert into lookup UCL staging table
+
+insert into table lookup_ucl
+select cid, mid, (AVG(amt) + (3 * STDDEV_POP(amt))) as ucl from
+(select card_id as cid, key.member_id as mid,key.amount as amt,
+row_number() OVER (PARTITION BY card_id order by UNIX_TIMESTAMP(key.transaction_dt, 'dd-MM-yyyy HH:mm:ss') desc) as rank
+from card_transations_hbase where status = "GENUINE")a
+where rank <= 10 group by cid, mid;
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Create lookup full staging table for UCL & memscore
+
+create table lookup_full (
+card_id bigint,
+member_id bigint,
+ucl bigint,
+score bigint);
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Insert UCL and Score into lookup full staging table
+
+insert into table lookup_full
+select u.card_id, u.member_id, u.ucl, m.score from lookup_ucl u
+LEFT OUTER JOIN member_score m
+ON (u.member_id = m.member_id);
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Create mapping table for HBase lookup table for loading limit attributes
+
+create external table lookup_limit_hbase(card_id bigint,
+ucl bigint, score bigint)
+STORED BY 'org.apache.hadoop.hive.hbase.HBaseStorageHandler'
+with serdeproperties
+("hbase.columns.mapping"=":key,limit:ucl,limit:score")
+tblproperties("hbase.table.name"="lookup");
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Insert UCL and Score into mapping lookup from staging table
+
+insert into table lookup_limit_hbase
+select card_id, ucl, score from lookup_full;
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Create mapping table for HBase lookup table for loading status attributes 
+
+create external table lookup_status_hbase(cid bigint,
+pc bigint, tdt string)
+STORED BY 'org.apache.hadoop.hive.hbase.HBaseStorageHandler'
+with serdeproperties
+("hbase.columns.mapping"=":key,status:pc,status:tdt")
+tblproperties("hbase.table.name"="lookup");
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Insert postal code and transaction date into mapping lookup from card_transations_hbase 
+
+insert into table lookup_status_hbase
+select card_id , post_code, td from
+(select card_id  ,key.transaction_dt as td, post_code,
+row_number() OVER (PARTITION BY card_id order by UNIX_TIMESTAMP(key.transaction_dt, 'dd-MM-yyyy HH:mm:ss') desc) as rank
+from card_transations_hbase where status = 'GENUINE') a
+where rank == 1;
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Create mapping table for Hbase lookup table
+
+create external table lookup_full_hbase(card_id bigint,
+ucl bigint, score bigint, post_code bigint, transaction_dt string)
+STORED BY 'org.apache.hadoop.hive.hbase.HBaseStorageHandler'
+with serdeproperties
+("hbase.columns.mapping"=":key,limit:ucl,limit:score, status:pc, status:tdt")
+tblproperties("hbase.table.name"="lookup");
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Drop tables
+
+drop table lookup_ucl;
+drop table lookup_full;
+drop lookup_limit_hbase
+drop lookup_limit_hbase
+drop table lookup_status_hbase;

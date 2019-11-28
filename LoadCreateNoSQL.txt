@@ -1,0 +1,45 @@
+                                                              | Credit Card Fraud Detection System LoadCreateNoSQL Batch layer |
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Hbase shell command for table creation
+
+create 'card_transactions','member_detail','transaction_detail'
+create 'lookup','limit','status'
+create 'card_member','card_detail','location'
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Create mapping table in hive for HBase card_transaction table
+
+create external table card_transations_hbase(key struct<member_id:bigint, transaction_dt:string, amount:bigint>,
+card_id bigint, post_code bigint, 
+pos_id bigint, status string)
+STORED BY 'org.apache.hadoop.hive.hbase.HBaseStorageHandler' 
+with serdeproperties 
+("hbase.columns.mapping"=":key,member_detail:card_id,transaction_detail:post_code,transaction_detail:pos_id,transaction_detail:status") 
+tblproperties("hbase.table.name"="card_transactions");
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Card transaction staging table in hive
+
+create table if not exists transations_load (
+card_id bigint,
+member_id bigint,
+amount bigint,
+post_code bigint,
+pos_id bigint,
+transaction_dt string,
+status string) row format delimited fields terminated by ',' 
+tblproperties ("skip.header.line.count"="1");
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Load data from local path into staging table 
+
+load data local inpath 
+'/home/cloudera/Desktop/card_transactions.csv' 
+overwrite into table transations_load ;
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Insert card transactions which has valid card id
+
+INSERT INTO TABLE card_transations_hbase
+SELECT NAMED_STRUCT('member_id', tl.member_id,'transaction_dt', tl.transaction_dt, 'amount', tl.amount),
+tl.card_id,post_code,pos_id,status  FROM transations_load tl; 
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--droping staging table
+
+drop table transations_load;
